@@ -1,0 +1,10 @@
+[package]
+name = "cluster-heist"
+version = "0.1.0"
+authors = ["Thomas Hertleif <thomas@hertleif.de>"]
+
+[dependencies]
+actix = "0.5"
+actix-web = "0.6"
+crossbeam-deque = "0.3"
+notify = "4"
