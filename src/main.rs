@@ -1,49 +1,74 @@
-extern crate actix_web;
-extern crate crossbeam_deque;
-extern crate notify;
-
-use actix_web::{server, App, HttpRequest, HttpResponse};
+extern crate env_logger;
+extern crate http;
+extern crate simple_server;
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate serde_json;
+use http::header;
+use simple_server::{Method, Server, StatusCode};
+use std::path::PathBuf;
 use std::thread;
 
-fn index(req: HttpRequest) -> &'static str {
-    "Hello world!"
-}
-
 fn main() {
+    env_logger::init().unwrap();
+
     println!("hello");
 
-    let d = Deque::new();
-    let s = d.stealer();
+    let t = thread::spawn(move || {
+        let host = "127.0.0.1";
+        let port = "7878";
 
-    thread::spawn(move || {
-        server::new(
-            || App::new()
-                .resource("/", |r| r.f(index)))
-            .bind("127.0.0.1:8088").expect("Can not bind to 127.0.0.1:8088")
-            .run();
+        let server = Server::new(|request, mut response| {
+            info!("Request received. {} {}", request.method(), request.uri());
+
+            match (request.method(), request.uri().path()) {
+                (&Method::POST, "/get-work") => {
+                    response.header(header::CONTENT_TYPE, "application/json".as_bytes());
+
+                    let files = get_relevant_files()?;
+
+                    let body = json!({
+                        "files": files,
+                    });
+                    let body = match serde_json::to_vec(&body) {
+                        Ok(bytes) => bytes,
+                        Err(_) => {
+                            response.status(StatusCode::INTERNAL_SERVER_ERROR);
+                            r#"{"error": true}"#.into()
+                        }
+                    };
+                    Ok(response.body(body)?)
+                }
+                (_, _) => {
+                    response.status(StatusCode::NOT_FOUND);
+                    Ok(response.body(
+                        r#"{"error": true, "message": "Not found"}"#.as_bytes()
+                            .to_vec(),
+                    )?)
+                }
+            }
+        });
+
+        server.listen(host, port);
     });
 
+    t.join();
+}
 
-    use notify::{watcher, DebouncedEvent}
-    use std::sync::mpsc::channel;
-    use std::time::Duration;
+fn get_relevant_files() -> Result<Vec<PathBuf>, ::std::io::Error> {
+    use std::fs::{self, DirEntry};
 
-    // Create a channel to receive the events.
-    let (tx, rx) = channel();
+    let dir = "./test/files";
+    let mut res = Vec::new();
 
-    // Create a watcher object, delivering debounced events.
-    // The notification back-end is selected based on the platform.
-    let mut watcher = watcher(tx, Duration::from_secs(10)).unwrap();
-
-    // Add a path to be watched. All files and directories at that path and
-    // below will be monitored for changes.
-    watcher.watch("./test/files", RecursiveMode::Recursive).unwrap();
-
-    loop {
-        match rx.recv() {
-           Ok(DebouncedEvent::Create(path)) => d.push(path),
-           Ok(whatever) => println!("wayne: {:?}", whatever),
-           Err(e) => println!("watch error: {:?}", e),
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            res.push(path);
         }
     }
+
+    Ok(res)
 }
